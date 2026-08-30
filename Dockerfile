@@ -1,7 +1,7 @@
 FROM python:3.10-slim
 
-# dlib ও face_recognition কম্পাইল করার জন্য প্রয়োজনীয় টুলস ইনস্টল
-RUN apt-get update && apt-get install -y \
+# মেমোরি বাঁচিয়ে ডিপেন্ডেন্সি ইনস্টল
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     libopenblas-dev \
@@ -13,11 +13,10 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-# pip আপগ্রেড ও প্যাকেজ ইনস্টল
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Uvicorn রান করা
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]
+# Render-এর দেয়া ডাইনামিক PORT ব্যবহার করা
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}"]
