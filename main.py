@@ -47,52 +47,19 @@ if not firebase_admin._apps:
 
     firebase_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
 
-    if firebase_json:
-        try:
-            firebase_info = json.loads(firebase_json)
-
-            cred = credentials.Certificate(firebase_info)
-
-            firebase_admin.initialize_app(cred)
-
-            print("✅ Firebase initialized from Environment Variable")
-
-        except Exception as e:
-            raise RuntimeError(
-                f"❌ Firebase Environment Variable Error: {e}"
-            )
-
+    iif not firebase_admin._apps:
+    # Render-এর Secret File অথবা লোকাল পিসির ফাইল থেকে সরাসরি রিড করবে
+    if os.path.exists("/etc/secrets/serviceAccountKey.json"):
+        cred = credentials.Certificate("/etc/secrets/serviceAccountKey.json")
+        firebase_admin.initialize_app(cred)
+        print("✅ Firebase initialized from Render Secret File")
+    elif os.path.exists("serviceAccountKey.json"):
+        cred = credentials.Certificate("serviceAccountKey.json")
+        firebase_admin.initialize_app(cred)
+        print("✅ Firebase initialized from local serviceAccountKey.json")
     else:
-        possible_paths = [
-            "serviceAccountKey.json",
-            "credentials/serviceAccountKey.json",
-            os.path.join(
-                os.path.dirname(__file__),
-                "serviceAccountKey.json"
-            ),
-        ]
-
-        cred_file = None
-
-        for path in possible_paths:
-            if os.path.exists(path):
-                cred_file = path
-                break
-
-        if cred_file:
-            cred = credentials.Certificate(cred_file)
-
-            firebase_admin.initialize_app(cred)
-
-            print(
-                f"✅ Firebase initialized with: {cred_file}"
-            )
-
-        else:
-            raise RuntimeError(
-                "❌ Firebase credentials not found!"
-            )
-
+        raise RuntimeError("❌ Firebase service account file not found!")
+    
 db = firestore.client()
 
 # ---------------- CLOUDINARY CONFIG ----------------
