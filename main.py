@@ -47,7 +47,7 @@ if not firebase_admin._apps:
 
     firebase_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
 
-    if not firebase_admin._apps:
+if not firebase_admin._apps:
     # Render-এর Secret File অথবা লোকাল পিসির ফাইল থেকে সরাসরি রিড করবে
     if os.path.exists("/etc/secrets/serviceAccountKey.json"):
         cred = credentials.Certificate("/etc/secrets/serviceAccountKey.json")
@@ -59,7 +59,6 @@ if not firebase_admin._apps:
         print("✅ Firebase initialized from local serviceAccountKey.json")
     else:
         raise RuntimeError("❌ Firebase service account file not found!")
-    
 db = firestore.client()
 
 # ---------------- CLOUDINARY CONFIG ----------------
