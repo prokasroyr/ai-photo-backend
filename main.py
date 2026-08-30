@@ -47,7 +47,7 @@ if not firebase_admin._apps:
 
     firebase_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
 
-    iif not firebase_admin._apps:
+    if not firebase_admin._apps:
     # Render-এর Secret File অথবা লোকাল পিসির ফাইল থেকে সরাসরি রিড করবে
     if os.path.exists("/etc/secrets/serviceAccountKey.json"):
         cred = credentials.Certificate("/etc/secrets/serviceAccountKey.json")
