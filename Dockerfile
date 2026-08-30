@@ -1,11 +1,7 @@
 FROM python:3.10-slim
 
-# প্রয়োজনীয় সিস্টেম লাইব্রেরি
+# OpenCV ও ছবির জন্য প্রয়োজনীয় সিস্টেমে লাইব্রেরি
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    cmake \
-    libopenblas-dev \
-    libx11-dev \
     libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
@@ -15,8 +11,14 @@ WORKDIR /app
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir --upgrade pip
-# dlib-bin ব্যবহার করায় সরাসরি রেডিমেড বাইনারি ডাউনলোড হবে (কম্পাইল হবে না)
-RUN pip install --no-cache-dir dlib-bin
+
+# ১. dlib-bin ও অন্যান্য সাপোর্ট প্যাকেজ ইনস্টল (কম্পাইল হবে না)
+RUN pip install --no-cache-dir dlib-bin face-recognition-models Click Pillow
+
+# ২. --no-deps দিয়ে face-recognition ইনস্টল (dlib কম্পাইল হওয়া আটকে দেওয়া হলো)
+RUN pip install --no-cache-dir face-recognition --no-deps
+
+# ৩. বাকি প্রজেক্ট প্যাকেজ ইনস্টল
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
