@@ -44,23 +44,34 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # ---------------- 2. FIREBASE INITIALIZATION ----------------
 
 if not firebase_admin._apps:
+    # সম্ভাব্য ফাইল পাথসমূহ
+    render_path = "/etc/secrets/serviceAccountKey.json"
+    local_path = "ai-server/credentials/serviceAccountKey.json"
+    root_path = "serviceAccountKey.json"
 
-    firebase_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
-
-if not firebase_admin._apps:
-    # Render-এর Secret File অথবা লোকাল পিসির ফাইল থেকে সরাসরি রিড করবে
-    if os.path.exists("/etc/secrets/serviceAccountKey.json"):
-        cred = credentials.Certificate("/etc/secrets/serviceAccountKey.json")
-        firebase_admin.initialize_app(cred)
-        print("✅ Firebase initialized from Render Secret File")
-    elif os.path.exists("serviceAccountKey.json"):
-        cred = credentials.Certificate("serviceAccountKey.json")
-        firebase_admin.initialize_app(cred)
-        print("✅ Firebase initialized from local serviceAccountKey.json")
+    # ফাইলটি যেখানে পাওয়া যাবে সেই পাথ সেট হবে
+    if os.path.exists(render_path):
+        key_path = render_path
+    elif os.path.exists(local_path):
+        key_path = local_path
+    elif os.path.exists(root_path):
+        key_path = root_path
     else:
-        raise RuntimeError("❌ Firebase service account file not found!")
-db = firestore.client()
+        key_path = None
 
+    if key_path:
+        with open(key_path, "r") as f:
+            cred_dict = json.load(f)
+
+        # Private Key-এর ফরম্যাটিং ঠিক করা
+        if "private_key" in cred_dict:
+            cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
+
+        cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(cred)
+        print(f"✅ Firebase initialized using path: {key_path}")
+    else:
+        raise RuntimeError("❌ Firebase serviceAccountKey.json file not found in any specified path!")
 # ---------------- CLOUDINARY CONFIG ----------------
 load_dotenv()
 
