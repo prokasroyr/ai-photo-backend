@@ -25,6 +25,9 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from google.cloud.firestore_v1.base_query import FieldFilter
 
+# Environment variables load
+load_dotenv()
+
 # ---------------- 1. FASTAPI & CORS SETUP ----------------
 app = FastAPI(title="AI Photo Matcher API")
 
@@ -41,40 +44,70 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ---------------- 2. FIREBASE INITIALIZATION ----------------
-# ---------------- 2. FIREBASE INITIALIZATION ----------------
-
 if not firebase_admin._apps:
-    # সম্ভাব্য ফাইল পাথসমূহ
-    render_path = "/etc/secrets/serviceAccountKey.json"
-    local_path = "ai-server/credentials/serviceAccountKey.json"
-    root_path = "serviceAccountKey.json"
+    secret_file = "/etc/secrets/serviceAccountKey.json"
+    local_paths = [
+        "ai-server/credentials/serviceAccountKey.json",
+        "credentials/serviceAccountKey.json",
+        "serviceAccountKey.json",
+        os.path.join(os.path.dirname(__file__), "serviceAccountKey.json"),
+    ]
 
-    # ফাইলটি যেখানে পাওয়া যাবে সেই পাথ সেট হবে
-    if os.path.exists(render_path):
-        key_path = render_path
-    elif os.path.exists(local_path):
-        key_path = local_path
-    elif os.path.exists(root_path):
-        key_path = root_path
-    else:
-        key_path = None
+    cred = None
 
-    if key_path:
-        with open(key_path, "r") as f:
-            cred_dict = json.load(f)
+    # ১. Render Secret File থেকে লোড করার চেষ্টা
+    if os.path.exists(secret_file):
+        try:
+            with open(secret_file, "r") as f:
+                cred_dict = json.load(f)
+            if "private_key" in cred_dict:
+                cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
+            cred = credentials.Certificate(cred_dict)
+            print("✅ Firebase initialized from Render Secret File")
+        except Exception as e:
+            print(f"⚠️ Render secret file error: {e}")
 
-        # Private Key-এর ফরম্যাটিং ঠিক করা
-        if "private_key" in cred_dict:
-            cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
+    # ২. লোকাল পিসির ফাইল থেকে লোড করার চেষ্টা
+    if not cred:
+        for path in local_paths:
+            if os.path.exists(path):
+                try:
+                    with open(path, "r") as f:
+                        cred_dict = json.load(f)
+                    if "private_key" in cred_dict:
+                        cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
+                    cred = credentials.Certificate(cred_dict)
+                    print(f"✅ Firebase initialized from local path: {path}")
+                    break
+                except Exception as e:
+                    print(f"⚠️ Local credential error at {path}: {e}")
 
-        cred = credentials.Certificate(cred_dict)
+    # ৩. Environment Variable থেকে লোড করার চেষ্টা
+    if not cred:
+        firebase_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
+        if firebase_json:
+            try:
+                cred_dict = json.loads(firebase_json)
+                if "private_key" in cred_dict:
+                    cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
+                cred = credentials.Certificate(cred_dict)
+                print("✅ Firebase initialized from Environment Variable")
+            except Exception as e:
+                print(f"⚠️ Environment Variable error: {e}")
+
+    if cred:
         firebase_admin.initialize_app(cred)
-        print(f"✅ Firebase initialized using path: {key_path}")
     else:
-        raise RuntimeError("❌ Firebase serviceAccountKey.json file not found in any specified path!")
-# ---------------- CLOUDINARY CONFIG ----------------
-load_dotenv()
+        raise RuntimeError("❌ Firebase credentials not found in any path or environment variable!")
 
+# Firestore Database Client Init
+try:
+    db = firestore.client()
+    print("✅ Firestore database connected successfully")
+except Exception as e:
+    raise RuntimeError(f"❌ Firestore connection failed: {e}")
+
+# ---------------- 3. CLOUDINARY CONFIG ----------------
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
     api_key=os.getenv("CLOUDINARY_API_KEY"),
@@ -82,7 +115,7 @@ cloudinary.config(
     secure=True
 )
 
-# ---------------- 3. PYDANTIC SCHEMAS ----------------
+# ---------------- 4. PYDANTIC SCHEMAS ----------------
 class ProcessEventRequest(BaseModel):
     eventId: str
 
@@ -103,7 +136,7 @@ class DownloadZipRequest(BaseModel):
     zipName: Optional[str] = "photos.zip"
     watermarkText: Optional[str] = None
 
-# ---------------- 4. HELPER FUNCTIONS ----------------
+# ---------------- 5. HELPER FUNCTIONS ----------------
 def add_watermark(image_np: np.ndarray, text: str) -> np.ndarray:
     """ছবিতে প্রফেশনালভাবে নিচের ডান কোণে ওয়াটারমার্ক বসানোর ফাংশন"""
     if not text:
@@ -111,20 +144,16 @@ def add_watermark(image_np: np.ndarray, text: str) -> np.ndarray:
     
     h, w, _ = image_np.shape
 
-    # ছবির রেজোল্যুশন অনুযায়ী ফন্ট স্কেল ও থিকনেস ঠিক করা
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = max(3, w / 1600)
     thickness = max(6, int(font_scale * 2))
 
-    # টেক্সটের ওয়াইড ও হাইট হিসাব করা
     (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
 
-    # নিচের ডান কোণে পজিশন ঠিক করা (৩% মার্জিন রেখে)
     margin = int(w * 0.05)
     text_x = w - text_w - margin
     text_y = h - margin
 
-    # ব্যাকগ্রাউন্ডের হালকা কালো শেড (Box)
     pad = 10
     overlay = image_np.copy()
     cv2.rectangle(
@@ -135,10 +164,8 @@ def add_watermark(image_np: np.ndarray, text: str) -> np.ndarray:
         -1
     )
     
-    # ব্যাকগ্রাউন্ডটি হালকা ট্রান্সপারেন্ট করা (৪০% কালো, ৬০% আসল ছবি)
     cv2.addWeighted(overlay, 0.4, image_np, 0.6, 0, image_np)
 
-    # সাদা রঙের টেক্সট বসানো
     cv2.putText(
         image_np, 
         text, 
@@ -152,9 +179,10 @@ def add_watermark(image_np: np.ndarray, text: str) -> np.ndarray:
 
     return image_np
 
-# ---------------- 5. BACKGROUND TASKS ----------------
+# ---------------- 6. BACKGROUND TASKS ----------------
 def process_event_photos_task(event_id: str):
     """ইভেন্টের সব ফটো প্রসেস করার ব্যাকগ্রাউন্ড টাস্ক"""
+    print(f"🚀 [1/3] AI Background Processing Started for eventId: {event_id}")
     try:
         event_ref = db.collection("events").document(event_id)
         photos_query = db.collection("photos").where("eventId", "==", event_id).get()
@@ -199,7 +227,6 @@ def process_event_photos_task(event_id: str):
             )
 
             print(f"\n📸 Processing Photo [{index + 1}/{total_photos}] - ID: {photo_id}")
-            print(f"🔗 URL: {raw_url}")
 
             if not raw_url:
                 print("❌ Error: No valid image URL found in document!")
@@ -276,9 +303,7 @@ def perform_face_search(event_id: str, selfie_url: str, job_id: str):
     job_ref = db.collection("aiJobs").document(job_id)
 
     try:
-        print(f"\n🔎 Starting AI Face Search")
-        print(f"🆔 Job ID: {job_id}")
-        print(f"🎟️ Event ID: {event_id}")
+        print(f"\n🔎 Starting AI Face Search | Job ID: {job_id} | Event ID: {event_id}")
 
         if selfie_url.startswith("http://") or selfie_url.startswith("https://"):
             resp = requests.get(
@@ -342,7 +367,6 @@ def perform_face_search(event_id: str, selfie_url: str, job_id: str):
         })
 
         matched_photos = []
-        processed_count = 0
 
         for index, photo_doc in enumerate(photos_query):
             photo_data = photo_doc.to_dict()
@@ -404,8 +428,6 @@ def perform_face_search(event_id: str, selfie_url: str, job_id: str):
                 "status": "processing"
             })
 
-            print(f"📊 Progress: {progress_percentage}% ({processed_count}/{total_photos})")
-
         job_ref.update({
             "status": "completed",
             "progress": 100,
@@ -414,10 +436,7 @@ def perform_face_search(event_id: str, selfie_url: str, job_id: str):
             "totalPhotos": total_photos
         })
 
-        print("\n🎉 AI FACE SEARCH COMPLETED")
-        print(f"📸 Total: {total_photos}")
-        print(f"🎯 Matches: {len(matched_photos)}")
-        print(f"🆔 Job: {job_id}\n")
+        print(f"\n🎉 AI FACE SEARCH COMPLETED | Total: {total_photos} | Matches: {len(matched_photos)}\n")
 
     except Exception as e:
         print(f"❌ Search Error: {e}")
@@ -426,7 +445,7 @@ def perform_face_search(event_id: str, selfie_url: str, job_id: str):
             "error": str(e)
         })
 
-# ---------------- 6. API ENDPOINTS ----------------
+# ---------------- 7. API ENDPOINTS ----------------
 
 @app.get("/")
 def home():
@@ -474,18 +493,11 @@ async def start_search(
 
     job_id = str(uuid.uuid4())
 
-    print("\n===================================")
-    print("🤖 NEW AI SEARCH JOB")
-    print("===================================")
-    print(f"🆔 Job ID: {job_id}")
-    print(f"🎟️ Event ID: {req.eventId}")
-
     photos_query = db.collection("photos").where(
         filter=FieldFilter("eventId", "==", req.eventId)
     ).get()
 
     total_photos = len(photos_query)
-    print(f"📸 Total Photos: {total_photos}")
 
     db.collection("aiJobs").document(job_id).set({
         "jobId": job_id,
@@ -499,8 +511,6 @@ async def start_search(
         "error": "",
         "createdAt": firestore.SERVER_TIMESTAMP
     })
-
-    print("✅ aiJobs document created")
 
     background_tasks.add_task(
         perform_face_search,
@@ -618,12 +628,6 @@ async def delete_photo(req: DeletePhotoRequest):
                 detail="Cloudinary publicId not found"
             )
 
-        print("\n===================================")
-        print("🗑️ DELETE PHOTO")
-        print("===================================")
-        print(f"📸 Photo ID: {req.photoId}")
-        print(f"☁️ Cloudinary Public ID: {public_id}")
-
         result = cloudinary.uploader.destroy(
             public_id,
             resource_type="image",
@@ -631,13 +635,8 @@ async def delete_photo(req: DeletePhotoRequest):
             invalidate=True
         )
 
-        print(f"☁️ Cloudinary Delete Result: {result}")
-
         if result.get("result") in ["ok", "not found"]:
             photo_ref.delete()
-            print("🔥 Firestore document deleted")
-            print("✅ Photo completely deleted")
-
             return {
                 "success": True,
                 "message": "Photo deleted successfully",
