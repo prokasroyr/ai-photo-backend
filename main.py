@@ -368,6 +368,26 @@ def perform_face_search(event_id: str, selfie_url: str, job_id: str):
 def home():
     return {"status": "online", "message": "AI Engine Server Ready"}
 
+# 📸 NEW: UPLOAD SELFIE ENDPOINT
+@app.post("/upload-selfie")
+async def upload_selfie(file: UploadFile = File(...)):
+    """গেস্ট সেলফি আপলোড করে ক্লাউডিনারির URL রিটার্ন করবে"""
+    try:
+        upload_result = cloudinary.uploader.upload(
+            file.file,
+            folder="selfies"
+        )
+        selfie_url = upload_result.get("secure_url") or upload_result.get("url")
+        return {
+            "success": True,
+            "url": selfie_url,
+            "path": selfie_url,
+            "selfieUrl": selfie_url
+        }
+    except Exception as e:
+        print(f"❌ Selfie upload error: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/process-event")
 async def process_event(req: ProcessEventRequest, background_tasks: BackgroundTasks):
     if not req.eventId:
